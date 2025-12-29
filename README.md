@@ -6,6 +6,8 @@ I initially worked on this project back in 2024 though didn't publish it online 
 
 Currently there is no support for audio and only support for Mapper 0 games.
 
+The repository is known to work on Windows, with the SDL2 dependency being included. 
+
 
 # Usage Guide
 
