@@ -49,13 +49,13 @@ cargo build --release
 
 Executable located in target/release
 
-3. Run and pass file to be interpreted as the first argument
+3. Run and pass a ROM file as the first argument
 
 ```sh
 ./<path-to-executable> <file>
 ```
 
-To build and interpret a file use -
+To build and immediately run with a ROM file use -
 
 ```sh
 cargo run --release -- <file>
