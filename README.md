@@ -1,6 +1,8 @@
 # About
 
-This is a basic (unfinished) emulator for the Nintendo Entertainment System.
+This is a basic (unfinished) emulator for the Nintendo Entertainment System. 
+
+I initially worked on this project back in 2024 though didn't publish it online for lack of polish.
 
 Currently there is no support for audio and only support for Mapper 0 games.
 
