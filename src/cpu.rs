@@ -42,13 +42,15 @@ pub struct CPU {
     status : u8,    //NV1B DIZC
 
     clk_cycles : u32,
-    internal_ram : [u8; 0x0800],
+    internal_ram : Vec<u8>,
+    //internal_ram : [u8; 0x0800],
     instruction_table : HashMap<u8, (fn(&mut Self, Operand), AddressingMode)>,
 
     rom: File,
     pub ppu: PPU,
     pub joypad: Joypad,
-    prg_rom: [u8; 0x4000],
+    prg_rom: Vec<u8>,
+    // prg_rom : [u8; 0x4000],
 }
 
 enum StatusBit {
@@ -92,11 +94,12 @@ enum AddressingMode {
 
 use std::collections::HashMap;
 // use std::os::unix::fs::FileExt;
-use AddressingMode::*;
-use StatusBit::*;
-use Operand::*;
+use AddressingMode::{*};
+use StatusBit::{*};
+use Operand::{*};
 
 use crate::ppu::{PPURegister, PPU};
+
 
 use self::joypad::Joypad;
 
@@ -442,8 +445,6 @@ impl CPU {
         it.insert(0xFC, (CPU::instr_NOP, AbsoluteX));
 
 
-        
-
         let this = Self {
             pc: 0x0000,  //tentative
             sp: 0x00,    // i think this is true?
@@ -452,22 +453,23 @@ impl CPU {
             iy: 0x00,
             status: 0b00100000,
             clk_cycles: 0,
-            internal_ram: [0; 2048],
+            internal_ram: vec![0; 2048],
             instruction_table: it,
 
             rom: fp,
             ppu: PPU::new(file_name)?,
             joypad: Joypad::new(),
-            prg_rom: [0; 0x4000],
+            prg_rom: vec![0; 0x4000],
         };
-
 
         Ok(this)
     }
 
     fn mem_read(&mut self, addr: u16) -> u8 {
         match addr {
-            0x0000..=0x1FFF => self.internal_ram[(addr % 0x0800) as usize],
+            0x0000..=0x1FFF => {
+                self.internal_ram[(addr % 0x0800) as usize]
+            },
 
             0x2000 => self.ppu.cpu_reg_read(PPURegister::PPUCtrl),
             0x2001 => self.ppu.cpu_reg_read(PPURegister::PPUMask),

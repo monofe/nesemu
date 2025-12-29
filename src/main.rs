@@ -3,17 +3,21 @@ mod ppu;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::io::Write;
-use std::thread::sleep;
-use std::fs::File;
+// use std::thread::sleep;
+use std::env;
 
 use sdl2::event::Event;
-use sdl2::{log, EventPump};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    std::env::set_var("RUST_BACKTRACE", "full");
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() != 2 {
+        panic!("Usage: ./nesemu rom_name.nes")
+    }
+
+    let rom = &args[1];
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -31,6 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut texture = creator
         .create_texture_target(PixelFormatEnum::RGB24, 256, 240)?;
 
+
     let mut key_map = HashMap::new();
     key_map.insert(Keycode::Z, cpu::joypad::JoypadButton::A);
     key_map.insert(Keycode::X, cpu::joypad::JoypadButton::B);
@@ -41,11 +46,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     key_map.insert(Keycode::Left, cpu::joypad::JoypadButton::Left);
     key_map.insert(Keycode::Right, cpu::joypad::JoypadButton::Right);
 
-    let mut f = File::create("mylog.log")?;
-    let mut cpu = cpu::CPU::new("C:\\Users\\user\\rust\\nesemu\\donkey kong.nes")?;
+
+    // let mut f = File::create("mylog.log")?;
+    // let fp = File::open(rom)?;
+    let mut cpu = cpu::CPU::new(rom)?;
+
     cpu.init();
 
-    
     loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -54,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 },
                 Event::KeyDown { keycode, .. } => {
                     if let Some(key) = key_map.get(&keycode.unwrap_or(Keycode::Ampersand)) {
-                        println!("{:?}", key);
+                        // println!("{:?}", key);
                         cpu.joypad.set_button(true, key);
                     }
                 },
@@ -107,7 +114,5 @@ fn main() -> Result<(), Box<dyn Error>> {
             canvas.copy(&texture, None, None)?;
             canvas.present();
         }
-        // sleep(std::time::Duration::from_millis(1));
     }
-
 }

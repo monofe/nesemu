@@ -82,10 +82,15 @@ pub struct PPU {
     ppuaddr: u16,
     ppudata: u8,
 
-    vram: [u8; 0x0800],
-    oam: [u8; 256],
-    palette: [u8; 32],
-    chr_rom: [u8; 0x2000],
+    // vram: [u8; 0x0800],
+    // oam: [u8; 256],
+    // palette: [u8; 32],
+    // chr_rom: [u8; 0x2000],
+
+    vram: Vec<u8>,
+    oam: Vec<u8>,
+    palette: Vec<u8>,
+    chr_rom: Vec<u8>,
 
     v: u16,     //15 bits
     t: u16,     //15 bits
@@ -95,7 +100,7 @@ pub struct PPU {
     ppuscroll_x: u8,    //least significant 8 bits
     ppuscroll_y: u8,    //least significant 8 bits
 
-    pub frame_buffer: [[(u8,u8,u8); 256]; 240],
+    pub frame_buffer: Vec<Vec<(u8, u8, u8)>>,
     rom: File,
 
     nmi_flag: bool,
@@ -117,10 +122,10 @@ impl PPU {
         //does the power up state matter? i dont know!
         let fp = File::open(file_name)?;
 
-        let mut buf = [0u8];
-        fp.seek_read(&mut buf, 6)?;
+        // let mut buf = [0u8];
+        // fp.seek_read(&mut buf, 6)?;
 
-        let mut buf = [0u8; 0x2000];
+        let mut buf = vec![0u8; 0x2000];
         fp.seek_read(&mut buf, 0x4000 + 0x10)?;
 
         let ppu = PPU {
@@ -133,9 +138,15 @@ impl PPU {
             ppuaddr: 0,
             ppudata: 0,
 
-            vram: [0; 0x0800],
-            oam: [0; 256],
-            palette: [0; 32],
+            mirroring: match buf[0] & 0x01 {
+                0 => Mirroring::Vertical,
+                1 => Mirroring::Horizontal,
+                _ => panic!("Mirroring fucked up")
+            },
+
+            vram: vec![0; 0x0800],
+            oam: vec![0; 256],
+            palette: vec![0; 32],
             chr_rom: buf,
 
             v: 0,
@@ -146,7 +157,7 @@ impl PPU {
             ppuscroll_x: 0,
             ppuscroll_y: 0,
 
-            frame_buffer: [[(0,0,0); 256]; 240],
+            frame_buffer: vec![vec![(0u8,0u8,0u8); 256]; 240],
             rom: fp,
             nmi_flag: false,
             new_frame_ready: false,
@@ -154,11 +165,7 @@ impl PPU {
             scanline_no: 0,
             vblank_on: false,
 
-            mirroring: match buf[0] & 0x01 {
-                0 => Mirroring::Vertical,
-                1 => Mirroring::Horizontal,
-                _ => panic!("Mirroring fucked up")
-            }
+            
         };
 
         Ok(ppu)
@@ -457,6 +464,15 @@ impl PPU {
             self.clk_cycle += 1;
         }
 
+        let sprite_zero_scanline: u16 = self.oam[0] as u16;     //sprite zero y coord
+        let sprite_zero_clk_cycle: u32 = self.oam[3] as u32;    //sprite zero x coord
+
+        if self.scanline_no == sprite_zero_scanline && self.clk_cycle == sprite_zero_clk_cycle {
+            //sprite zero hit logic
+            self.ppustatus |= 0b0100_0000;
+            return;
+        }
+
         match (self.scanline_no, self.clk_cycle) {
             (240, 0) => {
                 self.render_frame();
@@ -482,6 +498,7 @@ impl PPU {
 
     fn render_frame(&mut self) {
         //need to add all the ppu register related stuff-
+        //as well as 8x16 sprite support
 
         //not adding scroll for now
         let nametable_no = self.ppuctrl & 0b0000_0011;  //either 0,1,2 or 3
@@ -545,6 +562,7 @@ impl PPU {
                         select_bit(x, tile_row.1);
 
                     let colour;
+                    let mut colour_addr = palette_addr;
 
                     match bit_colour {
                         0b00 => {
@@ -552,8 +570,8 @@ impl PPU {
                         },
                         _ => {
                             //this is the final address of the colour we need
-                            palette_addr |= (bit_colour) as u16;
-                            colour = SYSTEM_PALETTE[self.mem_read(palette_addr) as usize];
+                            colour_addr |= (bit_colour) as u16;
+                            colour = SYSTEM_PALETTE[self.mem_read(colour_addr) as usize];
                         }
                     }
                     //now write this colour into the frame
@@ -564,57 +582,76 @@ impl PPU {
 
 
         for i in 0..64 {
-            //8x8 sprites for now
-            let y_pos: u16 = self.oam[i*4 as usize] as u16;        //y position of top of sprite (on screen i think)
-            let byte_1 = self.oam[i*4 + 1 as usize];    //tile index number (for 8x8, its slightly different for 8x16)
-            let byte_2 = self.oam[i*4 + 2 as usize];    //attributes
-            let x_pos: u16 = self.oam[i*4 + 3 as usize] as u16;    //x position of left of sprite
+            self.render_sprite(63-i);
+        }
+    }
 
-            // flip vertically based on bit 6 of attributes
-            let y_iter = match byte_2 & 0b1000_0000 {
-                0 => 0..8,
-                _ => 8..0,
-            };
+    fn render_sprite(&mut self, oam_sprite_index: usize) {
+        let sprite_pattern_table_no = match self.ppuctrl & 0b0000_1000 {
+            0 => 0b0,
+            _ => 0b1,
+        };
 
-            for y in y_iter {
-                let tile_row_addr: u16 = ((pattern_tbl_no << 12) | ((byte_1 as u16) << 4)) + y;
+        //8x8 sprites for now
+        let y_pos: u16 = self.oam[oam_sprite_index*4] as u16;       //y position of top of sprite (on screen i think)
+        let byte_1 = self.oam[oam_sprite_index*4 + 1];          //tile index number (for 8x8, its slightly different for 8x16)
+        let byte_2 = self.oam[oam_sprite_index*4 + 2];          //attributes
+        let x_pos: u16 = self.oam[oam_sprite_index*4 + 3] as u16;   //x position of left of sprite
 
-                let tile_row = (self.mem_read(tile_row_addr | 0b1000),
-                    self.mem_read(tile_row_addr | 0b0000));
+        for y in 0..8 {
+            let tile_row_addr: u16 = ((sprite_pattern_table_no << 12) | ((byte_1 as u16) << 4)) + y;
 
-                //the below palette addr has it hardcoded in that its only for backgrounds
-                let mut palette_addr: u16 = 0b0011_1111_0001_0000;
+            let tile_row = (self.mem_read(tile_row_addr | 0b1000),
+                self.mem_read(tile_row_addr | 0b0000));
 
-                //byte 2 palette bits
-                palette_addr |= ((byte_2 & 0b0000_0011) << 2) as u16;
+            //the below palette addr has it hardcoded in that its only for backgrounds
+            let mut palette_addr: u16 = 0b0011_1111_0001_0000;
 
-                // flip horizontally based on bit 6 of attributes
-                let x_iter = match byte_2 & 0b0100_0000 {
-                    0 => 0..8,
-                    _ => 8..0,
+            //byte 2 palette bits
+            palette_addr |= ((byte_2 & 0b0000_0011) << 2) as u16;
+
+            for x in 0..8 {
+                let bit_colour = (select_bit(x, tile_row.0) << 1) + 
+                    select_bit(x, tile_row.1);
+                
+                let colour;
+                let mut colour_addr = palette_addr;
+
+                match bit_colour {
+                    0b00 => {
+                        // colour = (0u8, 0u8, 0u8);
+                        colour = Pixel::Transparent;
+                    },
+                    _ => {
+                        //this is the final address of the colour we need
+                        colour_addr |= (bit_colour) as u16;
+                        let tuple_colour = SYSTEM_PALETTE[self.mem_read(colour_addr) as usize];
+                        colour = Pixel::Coloured(tuple_colour.0, tuple_colour.1, tuple_colour.2)
+                    }
+                }
+
+                let effective_x = match byte_2 & 0b0100_0000 {
+                    0 => x,
+                    _ => 7-x,
                 };
 
-                for x in x_iter {
-                    let bit_colour = (select_bit(x, tile_row.0) << 1) + 
-                        select_bit(x, tile_row.1);
-                    
-                        let colour;
+                let effective_y = match byte_2 & 0b1000_0000 {
+                    0 => y,
+                    _ => 7-y,
+                };
 
-                        match bit_colour {
-                            0b00 => {
-                                colour = (0u8, 0u8, 0u8);
-                            },
-                            _ => {
-                                //this is the final address of the colour we need
-                                palette_addr |= (bit_colour) as u16;
-                                colour = SYSTEM_PALETTE[self.mem_read(palette_addr) as usize];
-                            }
-                        }
-                        //now write this colour into the frame
-                        if ((y_pos as usize + y as usize) < 240) && ((x_pos as usize + (7-x) as usize) < 256) {
-                            self.frame_buffer[y_pos as usize + y as usize][x_pos as usize + (7-x) as usize] = colour;
-                        }
-                    
+                //now write this colour into the frame
+                if ((y_pos as usize + y as usize) < 240) && ((x_pos as usize + (7-effective_x) as usize) < 256) {
+                    match colour {
+                        Pixel::Transparent => {},
+                        Pixel::Coloured(r,g,b) => {
+                            self.frame_buffer[y_pos as usize + effective_y as usize]
+                                [x_pos as usize + (7-effective_x) as usize] = (r,g,b);
+                        },
+                    }
+
+                    // self.frame_buffer[y_pos as usize + effective_y as usize]
+                    //     [x_pos as usize + (7-effective_x) as usize] = colour;
                 }
             }
         }
